@@ -8,7 +8,7 @@
 
 WINDOW *create_newwin(int height, int width, int starty, int startx);
 void destroy_win(WINDOW *local_win);
-WINDOW *square[9][9];
+WINDOW *square[9][9], *summary;
 char win_label[256];
 
 unsigned int startxs[9];
@@ -65,21 +65,15 @@ int main(int argc, char *argv[])
           case '\n':
             r = 0; ++s;
           break;
-          case '1':
-          case '2':
-          case '3':
-          case '4':
-          case '5':
-          case '6':
-          case '7':
-          case '8':
-          case '9':
+          case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9':
             if((r > 8) || (s > 8)) {
               printf("malformated input file at line %d character %d.\n", r, s);
               exit(0);
             }
             d = atoi(&c);
-            printf("pmark[%d][%d] = 1 << (%d - 1)\n", s, r, d);
+            //printf("pmark[%d][%d] = 1 << (%d - 1)\n", s, r, d);
+            // s - row
+            // r - column
             pmark[s][r] = 1 << (d - 1);
             ++r;
           break;
@@ -161,18 +155,22 @@ int main(int argc, char *argv[])
     startxs[i] = startys[i] = 2 + (i * 5) + 2 * (i / 3);
   }
 
-  unsigned char changed = 1;
+  unsigned char changed = 1, steps = 0, pmark_max = 0;
   signed char w;
   unsigned int bpmark;
 
   while(changed) {
     changed = 0;
+    ++steps;
+
+    // find all rows/columns where a singleton is located, and remove all possible location in that row/column
     for(int i = 0; i < 9; ++i) {
       memset(histogram, 0, 9);
       for(int j = 0; j < 9; ++j) {
         if(CountOnes(pmark[i][j]) == 1) {
           w = OneHot(pmark[i][j]);
           for(int k = 0; k < 9; ++k) {
+            // row
             if((pmark[i][k] & pmark[i][j]) && (CountOnes(pmark[i][k]) > 1) && (k != j)) {
               bpmark = pmark[i][k];
               pmark[i][k] &= ~(pmark[i][j]);
@@ -182,8 +180,9 @@ int main(int argc, char *argv[])
                 exit(-1);
               }
               changed = 1;
-              printf("marki[%d][%d]/%d 0x%02X -> 0x%02X\n", i, j, k, bpmark, pmark[i][k]);
+              //printf("marki[%d][%d]/%d 0x%02X -> 0x%02X\n", i, j, k, bpmark, pmark[i][k]);
             }
+            // columns
             if((pmark[k][j] & pmark[i][j]) && (CountOnes(pmark[k][j]) > 1) && (k != i)) {
               bpmark = pmark[k][j];
               pmark[k][j] &= ~(pmark[i][j]);
@@ -195,6 +194,7 @@ int main(int argc, char *argv[])
               //printf("markj[%d][%d]/%d\n", i, j, k);
             }
           }
+          // remove all locations for possible location in a 3x3 squares
           for(int y = 3*(i/3); y < (3*(i/3)+3); ++y) {
             for(int x = 3*(j/3); x < (3*(j/3)+3); ++x) {
               if((y!=i) && (x!=j) && (pmark[y][x] & pmark[i][j]) && (CountOnes(pmark[y][x]) > 1)) {
@@ -211,6 +211,7 @@ int main(int argc, char *argv[])
             }
           }
         }
+        // check for a hidden singleton (a location where a tag is only possible to be located)
         for(int k = 0; k < 9; ++k) {
           if(pmark[i][j] & (1 << k))
             ++histogram[k];
@@ -255,6 +256,7 @@ int main(int argc, char *argv[])
             }
         }
     }
+
     for(int x = 0; x < 9; x += 3) {
       for(int y = 0; y < 9; y += 3) {
         memset(histogram, 0, 9);
@@ -281,8 +283,145 @@ int main(int argc, char *argv[])
         }
       }
     }
+
+    for(int k = 0; k < 9; ++k) {
+      for(int x = 0; x < 9; x += 3) {
+        for(int y = 0; y < 9; y += 3) {
+          // check for a row/column where a certain number can be located only
+          // remove this row/column from both other 3x3 squares in the same line
+          int j = 10;
+          if(((pmark[x][y] & (1 << k)) || (pmark[x+1][y] & (1 << k)) || (pmark[x+2][y] & (1 << k))) \
+          && (!(pmark[x][y+1] & (1 << k)) && !(pmark[x+1][y+1] & (1 << k)) && !(pmark[x+2][y+1] & (1 << k))) \
+          && (!(pmark[x][y+2] & (1 << k)) && !(pmark[x+1][y+2] & (1 << k)) && !(pmark[x+2][y+2] & (1 << k))))
+          {
+            // column y contains 2 or 3 possible locations, so it must be pruned from the entire column - except from the current squares
+            //printf("found j = y.\n");
+            j = y;
+          }
+          if(((pmark[x][y+1] & (1 << k)) || (pmark[x+1][y+1] & (1 << k)) || (pmark[x+2][y+1] & (1 << k))) \
+          && (!(pmark[x][y] & (1 << k)) && !(pmark[x+1][y] & (1 << k)) && !(pmark[x+2][y] & (1 << k))) \
+          && (!(pmark[x][y+2] & (1 << k)) && !(pmark[x+1][y+2] & (1 << k)) && !(pmark[x+2][y+2] & (1 << k))))
+          {
+            // row x contains 2 or 3 possible locations, so it must be pruned from the entire row - except from the current squares
+            //printf("found j = y+1.\n");
+            j = y+1;
+          }
+          if(((pmark[x][y+2] & (1 << k)) || (pmark[x+1][y+2] & (1 << k)) || (pmark[x+2][y+2] & (1 << k))) \
+          && (!(pmark[x][y] & (1 << k)) && !(pmark[x+1][y] & (1 << k)) && !(pmark[x+2][y] & (1 << k))) \
+          && (!(pmark[x][y+1] & (1 << k)) && !(pmark[x+1][y+1] & (1 << k)) && !(pmark[x+2][y+1] & (1 << k))))
+          {
+            // column y contains 2 or 3 possible locations, so it must be pruned from the entire column - except from the current squares
+            //printf("found j = y+2.\n");
+            j = y+2;
+          }
+          if(j != 10) {
+            for(int i = 0; i < 9; i += 3) {
+              if(i != x) {
+                if((pmark[i][j] & (1 << k)) || (pmark[i+1][j] & (1 << k)) || (pmark[i+2][j] & (1 << k)))
+                  changed = 1;
+                pmark[i][j] &= ~(1 << k);
+                pmark[i+1][j] &= ~(1 << k);
+                pmark[i+2][j] &= ~(1 << k);
+              }
+            }
+          }
+
+          int i = 10;
+          if(((pmark[x][y] & (1 << k)) || (pmark[x][y+1] & (1 << k)) || (pmark[x][y+2] & (1 << k))) \
+          && (!(pmark[x+1][y] & (1 << k)) && !(pmark[x+1][y+1] & (1 << k)) && !(pmark[x+1][y+2] & (1 << k))) \
+          && (!(pmark[x+2][y] & (1 << k)) && !(pmark[x+2][y+1] & (1 << k)) && !(pmark[x+2][y+2] & (1 << k))))
+          {
+            // column y contains 2 or 3 possible locations, so it must be pruned from the entire column - except from the current squares
+            //printf("found i = x.\n");
+            i = x;
+          }
+          if(((pmark[x+1][y] & (1 << k)) || (pmark[x+1][y+1] & (1 << k)) || (pmark[x+1][y+2] & (1 << k))) \
+          && (!(pmark[x][y] & (1 << k)) && !(pmark[x][y+1] & (1 << k)) && !(pmark[x][y+2] & (1 << k))) \
+          && (!(pmark[x+2][y] & (1 << k)) && !(pmark[x+2][y+1] & (1 << k)) && !(pmark[x+2][y+2] & (1 << k))))
+          {
+            // row x contains 2 or 3 possible locations, so it must be pruned from the entire row - except from the current squares
+            //printf("found i = x+1.\n");
+            i = x+1;
+          }
+          if(((pmark[x+2][y] & (1 << k)) || (pmark[x+2][y+1] & (1 << k)) || (pmark[x+2][y+2] & (1 << k))) \
+          && (!(pmark[x][y] & (1 << k)) && !(pmark[x][y+1] & (1 << k)) && !(pmark[x][y+2] & (1 << k))) \
+          && (!(pmark[x+1][y] & (1 << k)) && !(pmark[x+1][y+1] & (1 << k)) && !(pmark[x+1][y+2] & (1 << k))))
+          {
+            // column y contains 2 or 3 possible locations, so it must be pruned from the entire column - except from the current squares
+            //printf("found i = x+2.\n");
+            i = x+2;
+          }
+          if(i != 10) {
+            for(int j = 0; j < 9; j += 3) {
+              if(j != y) {
+                if((pmark[i][j] & (1 << k)) || (pmark[i][j+1] & (1 << k)) || (pmark[i][j+2] & (1 << k)))
+                  changed = 1;
+                pmark[i][j] &= ~(1 << k);
+                pmark[i][j+1] &= ~(1 << k);
+                pmark[i][j+2] &= ~(1 << k);
+              }
+            }
+          }
+
+        }
+      }
+    }
+
+    for(int k = 0; k < 9; ++k) {
+      for(int x = 0; x < 9; x += 3) {
+        for(int y = 0; y < 9; y += 3) {
+          for(int j = y; j < y+3; ++j) {
+            int matches = 0;
+            for(int i = 0; i < 9; ++i)
+              if(pmark[i][j] & (1 << k))
+                ++matches;
+            for(int i = x; i < x+3; ++i)
+              if(pmark[i][j] & (1 << k))
+                --matches;
+            if(matches == 0) {
+              for(int a = x; a < x+3; ++a) {
+                for(int b = y; b < y+3; ++b) {
+                  if((pmark[a][b] & (1 << k)) && (b != j)) {
+                    pmark[a][b] &= ~(1 << k);
+                    changed = 1;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    for(int k = 0; k < 9; ++k) {
+      for(int x = 0; x < 9; x += 3) {
+        for(int y = 0; y < 9; y += 3) {
+          for(int i = x; i < x+3; ++i) {
+            int matches = 0;
+            for(int j = 0; j < 9; ++j)
+              if(pmark[i][j] & (1 << k))
+                ++matches;
+            for(int j = y; j < y+3; ++j)
+              if(pmark[i][j] & (1 << k))
+                --matches;
+            if(matches == 0) {
+              for(int a = x; a < x+3; ++a) {
+                for(int b = y; b < y+3; ++b) {
+                  if((pmark[a][b] & (1 << k)) && (a != i)) {
+                    pmark[a][b] &= ~(1 << k);
+                    changed = 1;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
   }
 
+  //exit(0);
 	printw("Press F1 to exit");
 	refresh();
   for(int j = 0; j < 9; ++j) {
@@ -316,8 +455,32 @@ int main(int argc, char *argv[])
     }
   }
 
-	while((ch = getch()) != KEY_F(1))
-	{	switch(ch)
+  summary = create_newwin(49, 40, 2, 55);
+
+  memset(histogram, 0, 9);
+  if(argc > 1) {
+    for(int i = 0; i < 9; ++i) {
+      for(int j = 0; j < 9; ++j) {
+        ++histogram[CountOnes(pmark[i][j]) - 1];
+        if(pmark_max < CountOnes(pmark[i][j]))
+          pmark_max = CountOnes(pmark[i][j]);
+      }
+    }
+    //wprintw(summary, "\n");
+    wprintw(summary, "  PMark stats: (%d)\n", pmark_max);
+    for(int k = 0; k < pmark_max; ++k) {
+      wprintw(summary, "  %d) - %d\n", 1+k, histogram[k]);
+    }
+    //wprintw(summary, "\n");
+
+  }
+
+  wprintw(summary, "  Solution found in %d steps.\n", steps);
+  box(summary, 0, 0);
+  wrefresh(summary);
+
+  while(((ch = getch()) != KEY_F(1)) && (ch != 'q')) {}
+/*	{	switch(ch)
 		{	case KEY_LEFT:
 				destroy_win(square[4][4]);
 				square[4][4] = create_newwin(height, width, startys[4],--startxs[4]);
@@ -335,9 +498,10 @@ int main(int argc, char *argv[])
 				square[4][4] = create_newwin(height, width, ++startys[4],startxs[4]);
 				break;
 		}
-	}
+	}*/
 
   endwin();			/* End curses mode		  */
+
 	return 0;
 }
 
